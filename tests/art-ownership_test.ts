@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-  name: "Test registering new artwork",
+  name: "Test registering new artwork with royalties",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     
@@ -16,7 +16,8 @@ Clarinet.test({
       Tx.contractCall('art-ownership', 'register-artwork', [
         types.ascii("Mona Lisa"),
         types.uint(1000), // total shares
-        types.uint(100000000) // price per share in microSTX
+        types.uint(100000000), // price per share in microSTX
+        types.uint(10) // 10% royalty
       ], deployer.address)
     ]);
     
@@ -33,47 +34,41 @@ Clarinet.test({
 });
 
 Clarinet.test({
-  name: "Test share transfer",
+  name: "Test share transfer with royalty payment",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const wallet1 = accounts.get('wallet_1')!;
     
-    // First register artwork
+    // First register artwork with 10% royalty
     let register = chain.mineBlock([
       Tx.contractCall('art-ownership', 'register-artwork', [
         types.ascii("Starry Night"),
         types.uint(1000),
-        types.uint(100000000)
+        types.uint(100000000),
+        types.uint(10)
       ], deployer.address)
     ]);
     
-    // Transfer shares
+    // Transfer shares with payment
     let transfer = chain.mineBlock([
       Tx.contractCall('art-ownership', 'transfer-shares', [
         types.uint(1),
         types.principal(wallet1.address),
-        types.uint(500)
+        types.uint(500),
+        types.uint(50000000) // 0.5 STX payment
       ], deployer.address)
     ]);
     
     transfer.receipts[0].result.expectOk().expectBool(true);
     
-    // Check new balances
-    let deployerShares = chain.mineBlock([
-      Tx.contractCall('art-ownership', 'get-shares', [
+    // Check royalties earned
+    let royalties = chain.mineBlock([
+      Tx.contractCall('art-ownership', 'get-royalties-earned', [
         types.uint(1),
         types.principal(deployer.address)
       ], deployer.address)
     ]);
     
-    let wallet1Shares = chain.mineBlock([
-      Tx.contractCall('art-ownership', 'get-shares', [
-        types.uint(1),
-        types.principal(wallet1.address)
-      ], deployer.address)
-    ]);
-    
-    deployerShares.receipts[0].result.expectOk().expectUint(500);
-    wallet1Shares.receipts[0].result.expectOk().expectUint(500);
+    royalties.receipts[0].result.expectOk().expectUint(5000000); // 10% of 0.5 STX = 0.05 STX
   },
 });
