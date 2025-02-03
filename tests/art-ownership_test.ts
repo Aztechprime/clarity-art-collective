@@ -34,7 +34,7 @@ Clarinet.test({
 });
 
 Clarinet.test({
-  name: "Test share transfer with royalty payment",
+  name: "Test share transfer with escrow and royalty payment",
   async fn(chain: Chain, accounts: Map<string, Account>) {
     const deployer = accounts.get('deployer')!;
     const wallet1 = accounts.get('wallet_1')!;
@@ -49,17 +49,27 @@ Clarinet.test({
       ], deployer.address)
     ]);
     
-    // Transfer shares with payment
-    let transfer = chain.mineBlock([
-      Tx.contractCall('art-ownership', 'transfer-shares', [
+    // Initiate share transfer
+    let initiate = chain.mineBlock([
+      Tx.contractCall('art-ownership', 'initiate-share-transfer', [
         types.uint(1),
         types.principal(wallet1.address),
-        types.uint(500),
-        types.uint(50000000) // 0.5 STX payment
+        types.uint(500)
       ], deployer.address)
     ]);
     
-    transfer.receipts[0].result.expectOk().expectBool(true);
+    initiate.receipts[0].result.expectOk().expectBool(true);
+    
+    // Complete share transfer with payment
+    let complete = chain.mineBlock([
+      Tx.contractCall('art-ownership', 'complete-share-transfer', [
+        types.uint(1),
+        types.principal(deployer.address),
+        types.uint(50000000) // 0.5 STX payment
+      ], wallet1.address)
+    ]);
+    
+    complete.receipts[0].result.expectOk().expectBool(true);
     
     // Check royalties earned
     let royalties = chain.mineBlock([
