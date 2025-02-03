@@ -13,6 +13,7 @@
 
 (define-map ownership-shares { artwork-id: uint, owner: principal } uint)
 (define-map royalty-payments { artwork-id: uint, owner: principal } uint)
+(define-map share-transfer-escrow { artwork-id: uint, from: principal, to: principal } uint)
 
 ;; Error codes
 (define-constant err-not-authorized (err u100))
@@ -22,6 +23,7 @@
 (define-constant err-artwork-not-found (err u104))
 (define-constant err-invalid-royalty (err u105))
 (define-constant err-payment-failed (err u106))
+(define-constant err-no-escrow (err u107))
 
 ;; Data variables
 (define-data-var next-artwork-id uint u1)
@@ -47,14 +49,26 @@
     )
 )
 
-;; Transfer shares with royalty payment
-(define-public (transfer-shares (artwork-id uint) (recipient principal) (shares uint) (payment uint))
+;; Initialize share transfer escrow
+(define-public (initiate-share-transfer (artwork-id uint) (recipient principal) (shares uint))
+    (let
+        ((sender-shares (default-to u0 (map-get? ownership-shares {artwork-id: artwork-id, owner: tx-sender}))))
+        (asserts! (>= sender-shares shares) err-insufficient-shares)
+        (map-set share-transfer-escrow 
+            {artwork-id: artwork-id, from: tx-sender, to: recipient}
+            shares
+        )
+        (ok true)
+    )
+)
+
+;; Complete share transfer with royalty payment
+(define-public (complete-share-transfer (artwork-id uint) (seller principal) (payment uint))
     (let 
-        ((sender-shares (default-to u0 (map-get? ownership-shares {artwork-id: artwork-id, owner: tx-sender})))
+        ((escrow-shares (unwrap! (map-get? share-transfer-escrow {artwork-id: artwork-id, from: seller, to: tx-sender}) err-no-escrow))
+         (seller-shares (default-to u0 (map-get? ownership-shares {artwork-id: artwork-id, owner: seller})))
          (artwork (unwrap! (map-get? artwork-details artwork-id) err-artwork-not-found))
          (royalty-amount (/ (* payment (get royalty-percentage artwork)) u100)))
-        
-        (asserts! (>= sender-shares shares) err-insufficient-shares)
         
         ;; Process royalty payment to artist
         (try! (stx-transfer? royalty-amount tx-sender (get artist artwork)))
@@ -66,11 +80,14 @@
         )
         
         ;; Transfer shares
-        (map-set ownership-shares {artwork-id: artwork-id, owner: tx-sender} (- sender-shares shares))
+        (map-set ownership-shares {artwork-id: artwork-id, owner: seller} (- seller-shares escrow-shares))
         (map-set ownership-shares 
-            {artwork-id: artwork-id, owner: recipient} 
-            (+ shares (default-to u0 (map-get? ownership-shares {artwork-id: artwork-id, owner: recipient})))
+            {artwork-id: artwork-id, owner: tx-sender} 
+            (+ escrow-shares (default-to u0 (map-get? ownership-shares {artwork-id: artwork-id, owner: tx-sender})))
         )
+        
+        ;; Clear escrow
+        (map-delete share-transfer-escrow {artwork-id: artwork-id, from: seller, to: tx-sender})
         (ok true)
     )
 )
